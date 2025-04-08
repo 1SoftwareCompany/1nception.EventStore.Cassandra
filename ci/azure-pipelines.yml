@@ -1,6 +1,6 @@
 ---
 variables:
-  PROJECT_DIR: Elders.Cronus.Persistence.Cassandra
+  PROJECT_DIR: One.Inception.EventStore.Cassandra
 
 trigger:
   branches:
