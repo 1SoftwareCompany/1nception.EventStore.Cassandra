@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace One.Inception.EventStore.Cassandra
 {
@@ -31,28 +32,28 @@ namespace One.Inception.EventStore.Cassandra
             this.lockTtl = TimeSpan.FromSeconds(2);
             if (lockTtl == TimeSpan.Zero) throw new ArgumentException("Lock ttl must be more than 0", nameof(lockTtl));
 
-            tenantsOptions.OnChange(OptionsChangedBootstrapEventStoreForTenant);
+            tenantsOptions.OnChange(async (newOptions) => await OptionsChangedBootstrapEventStoreForTenantAsync(newOptions).ConfigureAwait(false));
         }
 
-        public void Bootstrap()
+        public Task BootstrapAsync()
         {
-            BootstrapTenants(tenants.Tenants);
+            return BootstrapTenantsAsync(tenants.Tenants);
         }
 
-        private void BootstrapTenants(IEnumerable<string> tenants)
+        private async Task BootstrapTenantsAsync(IEnumerable<string> tenants)
         {
             string lockKey = $"{bc.Name}{Enum.GetName(typeof(Bootstraps), Bootstraps.ExternalResource)}";
-            if (@lock.LockAsync(lockKey, lockTtl).GetAwaiter().GetResult())
+            if (await @lock.LockAsync(lockKey, lockTtl).ConfigureAwait(false))
             {
                 foreach (var tenant in tenants)
                 {
                     DefaultContextFactory contextFactory = serviceProvider.GetRequiredService<DefaultContextFactory>();
                     InceptionContext context = contextFactory.Create(tenant, serviceProvider);
 
-                    serviceProvider.GetRequiredService<CassandraEventStoreSchema>().CreateStorageAsync().GetAwaiter().GetResult();
+                    await serviceProvider.GetRequiredService<CassandraEventStoreSchema>().CreateStorageAsync().ConfigureAwait(false);
                 }
 
-                @lock.UnlockAsync(lockKey).GetAwaiter().GetResult();
+                await @lock.UnlockAsync(lockKey).ConfigureAwait(false);
             }
             else
             {
@@ -60,7 +61,7 @@ namespace One.Inception.EventStore.Cassandra
             }
         }
 
-        private void OptionsChangedBootstrapEventStoreForTenant(TenantsOptions newOptions)
+        private async Task OptionsChangedBootstrapEventStoreForTenantAsync(TenantsOptions newOptions)
         {
             if (tenants.Tenants.SequenceEqual(newOptions.Tenants) == false) // Check for difference between tenants and newOptions
             {
@@ -70,7 +71,7 @@ namespace One.Inception.EventStore.Cassandra
                 // Find the difference between the old and new tenants
                 // and bootstrap the new tenants
                 var newTenants = newOptions.Tenants.Except(tenants.Tenants);
-                BootstrapTenants(newTenants);
+                await BootstrapTenantsAsync(newTenants).ConfigureAwait(false);
 
                 tenants = newOptions;
             }

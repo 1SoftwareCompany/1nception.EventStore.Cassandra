@@ -25,7 +25,7 @@ public class CassandraFixture : ICassandraProvider, IAsyncDisposable, IAsyncLife
             .WithPortBinding(7199, true)
             .WithPortBinding(9042, true)
             .WithPortBinding(9160, true)
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(9042))
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(9042))
             .Build();
 
         await Container.StartAsync();
