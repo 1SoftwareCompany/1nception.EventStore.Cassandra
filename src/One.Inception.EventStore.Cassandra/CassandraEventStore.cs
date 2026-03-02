@@ -2,12 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Cassandra;
+using Microsoft.Extensions.Logging;
 using One.Inception.EventStore.Index;
 using One.Inception.MessageProcessing;
-using Microsoft.Extensions.Logging;
 
 namespace One.Inception.EventStore.Cassandra
 {
@@ -156,7 +157,14 @@ namespace One.Inception.EventStore.Cassandra
             }
             else
             {
-                return EnumerateEventStoreForSpecifiedEvent(@operator, replayOptions, cancellationToken);
+                if (replayOptions.AggregateRootId is not null)
+                {
+                    return EnumerateEventStoreForSpecifiedEventTypeAndAggregateId(@operator, replayOptions, cancellationToken);
+                }
+                else
+                {
+                    return EnumerateEventStoreForSpecifiedEvent(@operator, replayOptions, cancellationToken);
+                }
             }
         }
 
@@ -390,6 +398,61 @@ namespace One.Inception.EventStore.Cassandra
             }
         }
 
+        private async Task EnumerateEventStoreForSpecifiedEventTypeAndAggregateId(PlayerOperator @operator, PlayerOptions replayOptions, CancellationToken cancellationToken = default)
+        {
+            if (replayOptions.EventTypeId is null || replayOptions.AggregateRootId is null)
+            {
+                logger.LogError("Failed to enumerate event store for specific events for aggregate. Event type and/or aggregateRootId is null.");
+                return;
+            }
+
+            var result = await LoadAsync(replayOptions.AggregateRootId.RawId);
+
+            if (result.Commits.Count == 0)
+                return;
+
+            long after = replayOptions.After.HasValue ? replayOptions.After.Value.ToFileTime() : 0;
+            long before = replayOptions.Before.HasValue ? replayOptions.Before.Value.ToFileTime() : DateTimeOffset.MaxValue.ToFileTime();
+
+            if (@operator.OnLoadAsync is not null)
+            {
+                // we need to find what we want
+                if (replayOptions.ShouldReplayLastEventOnly) // only enumerate the last event of that type
+                {
+                    for (int commitIndex = result.Commits.Count - 1; commitIndex >= 0; commitIndex--)
+                    {
+                        AggregateCommitRaw commit = result.Commits[commitIndex];
+                        for (int eventIndex = commit.Events.Count - 1; eventIndex >= 0; eventIndex--)
+                        {
+                            AggregateEventRaw @event = commit.Events[eventIndex];
+                            if (@event.Timestamp >= after && @event.Timestamp <= before) // because the stupid query for range can not be executed and we need to preform a check like this, instead of loading what we want
+                            {
+                                if (IsEventTypePresentInData(replayOptions.EventTypeId, @event.Data))
+                                {
+                                    await @operator.OnLoadAsync(commit.Events[eventIndex]).ConfigureAwait(false);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                else // enumerate    all events of that type
+                {
+                    for (int commitIndex = 0; commitIndex < result.Commits.Count; commitIndex++)
+                    {
+                        AggregateCommitRaw commit = result.Commits[commitIndex];
+                        for (int eventIndex = 0; eventIndex < commit.Events.Count; eventIndex++)
+                        {
+                            if (IsEventTypePresentInData(replayOptions.EventTypeId, commit.Events[eventIndex].Data))
+                            {
+                                await @operator.OnLoadAsync(commit.Events[eventIndex]).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         private async Task<AggregateStream> LoadAsync(ReadOnlyMemory<byte> id)
         {
             List<AggregateEventRaw> aggregateEvents = new List<AggregateEventRaw>();
@@ -469,6 +532,15 @@ namespace One.Inception.EventStore.Cassandra
             }
 
             return pagingInfo;
+        }
+
+        private bool IsEventTypePresentInData(string eventTypeToSearch, ReadOnlySpan<byte> data)
+        {
+            byte[] eventTypeBytes = Encoding.UTF8.GetBytes(eventTypeToSearch);
+            if (data.IndexOf(eventTypeBytes) > -1)
+                return true;
+
+            return false;
         }
 
         class LoadEventQuery : PreparedStatementCache
