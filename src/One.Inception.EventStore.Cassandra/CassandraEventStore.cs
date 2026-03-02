@@ -419,8 +419,13 @@ namespace One.Inception.EventStore.Cassandra
                 // we need to find what we want
                 if (replayOptions.ShouldReplayLastEventOnly) // only enumerate the last event of that type
                 {
+                    bool shouldBreak = false;
+
                     for (int commitIndex = result.Commits.Count - 1; commitIndex >= 0; commitIndex--)
                     {
+                        if (shouldBreak)
+                            break;
+
                         AggregateCommitRaw commit = result.Commits[commitIndex];
                         for (int eventIndex = commit.Events.Count - 1; eventIndex >= 0; eventIndex--)
                         {
@@ -430,6 +435,7 @@ namespace One.Inception.EventStore.Cassandra
                                 if (IsEventTypePresentInData(replayOptions.EventTypeId, @event.Data))
                                 {
                                     await @operator.OnLoadAsync(commit.Events[eventIndex]).ConfigureAwait(false);
+                                    shouldBreak = true;
                                     break;
                                 }
                             }
