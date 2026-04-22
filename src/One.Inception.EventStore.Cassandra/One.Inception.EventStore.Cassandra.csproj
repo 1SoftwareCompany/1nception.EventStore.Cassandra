@@ -29,9 +29,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="1nception" Version="13.0.0-preview.9" />
+    <PackageReference Include="1nception" Version="13.0.0-preview.12" />
     <PackageReference Include="CassandraCSharpDriver" Version="3.22.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.1" />
+    <PackageReference Include="CassandraCSharpDriver.OpenTelemetry" Version="3.22.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.7" />
   </ItemGroup>
 
   <ItemGroup>
