@@ -31,7 +31,7 @@
   <ItemGroup>
     <PackageReference Include="1nception" Version="12.0.0" />
     <PackageReference Include="CassandraCSharpDriver" Version="3.22.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.17" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.18" />
   </ItemGroup>
 
   <ItemGroup>
