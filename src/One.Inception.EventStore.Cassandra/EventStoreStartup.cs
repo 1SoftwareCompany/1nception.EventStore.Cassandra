@@ -32,46 +32,62 @@ namespace One.Inception.EventStore.Cassandra
             this.lockTtl = TimeSpan.FromSeconds(2);
             if (lockTtl == TimeSpan.Zero) throw new ArgumentException("Lock ttl must be more than 0", nameof(lockTtl));
 
-            tenantsOptions.OnChange(async (newOptions) => await OptionsChangedBootstrapEventStoreForTenantAsync(newOptions).ConfigureAwait(false));
+            tenantsOptions.OnChange(TenantOptionsChanged);
         }
 
         public Task BootstrapAsync()
         {
-            return BootstrapTenantsAsync(tenants.Tenants);
+            return BootstrapTenantsInternalAsync(tenants.Tenants);
         }
 
-        private async Task BootstrapTenantsAsync(IEnumerable<string> tenants)
+        public Task BootstrapAsync(IEnumerable<string> tenants)
         {
-            string lockKey = $"{bc.Name}{Enum.GetName(typeof(Bootstraps), Bootstraps.ExternalResource)}";
-            if (await @lock.LockAsync(lockKey, lockTtl).ConfigureAwait(false))
-            {
-                foreach (var tenant in tenants)
-                {
-                    DefaultContextFactory contextFactory = serviceProvider.GetRequiredService<DefaultContextFactory>();
-                    InceptionContext context = contextFactory.Create(tenant, serviceProvider);
+            return BootstrapTenantsInternalAsync(tenants);
+        }
 
-                    await serviceProvider.GetRequiredService<CassandraEventStoreSchema>().CreateStorageAsync().ConfigureAwait(false);
+        private async Task BootstrapTenantsInternalAsync(IEnumerable<string> tenants)
+        {
+            const int maxAttempts = 5;
+            string lockKey = $"{bc.Name}{Enum.GetName(typeof(Bootstraps), Bootstraps.ExternalResource)}";
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                if (await @lock.LockAsync(lockKey, lockTtl).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        foreach (var tenant in tenants)
+                        {
+                            DefaultContextFactory contextFactory = serviceProvider.GetRequiredService<DefaultContextFactory>();
+                            InceptionContext context = contextFactory.Create(tenant, serviceProvider);
+
+                            await serviceProvider.GetRequiredService<CassandraEventStoreSchema>().CreateStorageAsync().ConfigureAwait(false);
+                        }
+                        return;
+                    }
+                    finally
+                    {
+                        await @lock.UnlockAsync(lockKey).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("[EventStore] Could not acquire lock for `{boundedContext}` to create table. Attempt {attempt}/{maxAttempts}.", bc.Name, attempt, maxAttempts);
                 }
 
-                await @lock.UnlockAsync(lockKey).ConfigureAwait(false);
+                if (attempt < maxAttempts)
+                    await Task.Delay(TimeSpan.FromSeconds(attempt)).ConfigureAwait(false);
             }
-            else
-            {
-                logger.LogWarning("[EventStore] Could not acquire lock for `{boundedContext}` to create table.", bc.Name);
-            }
+
+            logger.LogError("[EventStore] Failed to acquire lock for `{boundedContext}` after {maxAttempts} attempts.", bc.Name, maxAttempts);
         }
 
-        private async Task OptionsChangedBootstrapEventStoreForTenantAsync(TenantsOptions newOptions)
+        private void TenantOptionsChanged(TenantsOptions newOptions)
         {
             if (tenants.Tenants.SequenceEqual(newOptions.Tenants) == false) // Check for difference between tenants and newOptions
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                     logger.LogDebug("tenant options re-loaded with {@options}", newOptions);
-
-                // Find the difference between the old and new tenants
-                // and bootstrap the new tenants
-                var newTenants = newOptions.Tenants.Except(tenants.Tenants);
-                await BootstrapTenantsAsync(newTenants).ConfigureAwait(false);
 
                 tenants = newOptions;
             }
