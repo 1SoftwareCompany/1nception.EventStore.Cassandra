@@ -5,6 +5,7 @@ using Cassandra;
 using One.Inception.EventStore.Cassandra.Counters;
 using One.Inception.EventStore.Cassandra.ReplicationStrategies;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace One.Inception.EventStore.Cassandra
 {
@@ -51,8 +52,13 @@ namespace One.Inception.EventStore.Cassandra
 
         public async Task CreateKeyspace(ISession session)
         {
+            long t0 = Stopwatch.GetTimestamp();
+
             IStatement createTableStatement = await GetCreateKeySpaceQuery(session).ConfigureAwait(false);
-            await session.ExecuteAsync(createTableStatement).ConfigureAwait(false);
+            var rs = await session.ExecuteAsync(createTableStatement).ConfigureAwait(false);
+
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(t0);
+            logger.LogInformation("[EventStore] Created keyspace... Maybe?! Is schema in agreement = {isSchemaInAgreement}. Time elapsed : {timeForExecution}", rs?.Info?.IsSchemaInAgreement, elapsed);
         }
 
         public Task CreateEventsStorageAsync(ISession session)
@@ -84,6 +90,8 @@ namespace One.Inception.EventStore.Cassandra
 
         private async Task CreateTableAsync(ISession session, string cqlQueryTemplate, string tableName)
         {
+            long t0 = Stopwatch.GetTimestamp();
+
             string keyspace = cassandraProvider.GetKeyspace();
 
             if (logger.IsEnabled(LogLevel.Debug))
@@ -93,10 +101,14 @@ namespace One.Inception.EventStore.Cassandra
             PreparedStatement createEventsTableStatement = await session.PrepareAsync(query).ConfigureAwait(false);
             createEventsTableStatement.SetConsistencyLevel(ConsistencyLevel.All);
 
-            await session.ExecuteAsync(createEventsTableStatement.Bind()).ConfigureAwait(false);
+            var rs = await session.ExecuteAsync(createEventsTableStatement.Bind()).ConfigureAwait(false);
+
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(t0);
 
             if (logger.IsEnabled(LogLevel.Debug))
                 logger.LogDebug("[EventStore] Created table `{tableName}` in keyspace `{keyspace}`...", tableName, keyspace);
+
+            logger.LogInformation("[EventStore] Created table `{tableName}`... Maybe?! Is schema in agreement = {isSchemaInAgreement}. Time elapsed : {timeForExecution}", tableName, rs?.Info?.IsSchemaInAgreement, elapsed);
         }
     }
 }
