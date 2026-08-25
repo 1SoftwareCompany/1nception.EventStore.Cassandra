@@ -41,13 +41,9 @@ namespace One.Inception.EventStore.Cassandra
 
             await CreateKeyspace(session).ConfigureAwait(false);
 
-            Task[] createESTasks =
-            [
-                CreateEventsStorageAsync(session),
-                CreateIndeciesAsync(session)
-            ];
+            await CreateEventsStorageAsync(session).ConfigureAwait(false);
 
-            await Task.WhenAll(createESTasks).ConfigureAwait(false);
+            await CreateIndeciesAsync(session).ConfigureAwait(false);
         }
 
         public async Task CreateKeyspace(ISession session)
@@ -67,15 +63,10 @@ namespace One.Inception.EventStore.Cassandra
             return CreateTableAsync(session, CreateEventsTableQueryTemplate, tableName);
         }
 
-        public Task CreateIndeciesAsync(ISession session)
+        public async Task CreateIndeciesAsync(ISession session)
         {
-            Task[] createTableTasks = new Task[]
-                {
-                    CreateTableAsync(session, CREATE_INDEX_BY_EVENT_TYPE_TABLE_TEMPLATE, INDEX_BY_EVENT_TYPE_TABLE_NAME),
-                    CreateTableAsync(session, MessageCounter.CreateTableTemplate, "EventCounter")
-                };
-
-            return Task.WhenAll(createTableTasks);
+           await CreateTableAsync(session, CREATE_INDEX_BY_EVENT_TYPE_TABLE_TEMPLATE, INDEX_BY_EVENT_TYPE_TABLE_NAME).ConfigureAwait(false);
+           await CreateTableAsync(session, MessageCounter.CreateTableTemplate, "EventCounter").ConfigureAwait(false);
         }
 
         private async Task<IStatement> GetCreateKeySpaceQuery(ISession session)
