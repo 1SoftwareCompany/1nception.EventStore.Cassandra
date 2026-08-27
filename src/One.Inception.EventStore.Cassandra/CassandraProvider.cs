@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Cassandra;
+using Cassandra.OpenTelemetry;
 using Cassandra.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -78,10 +79,12 @@ namespace One.Inception.EventStore.Cassandra
                         .WithReconnectionPolicy(new ExponentialReconnectionPolicy(100, 100000))
                         .WithRetryPolicy(new NoHintedHandOffRetryPolicy())
                         .WithCompression(CompressionType.LZ4)
+                        .WithMaxSchemaAgreementWaitSeconds(1200) // temp 20 min for seeing how much time it really takes
                         .WithPoolingOptions(new PoolingOptions()
                             .SetCoreConnectionsPerHost(HostDistance.Local, 2)
                             .SetMaxConnectionsPerHost(HostDistance.Local, 8)
                             .SetMaxRequestsPerConnection(options.MaxRequestsPerConnection))
+                        .WithOpenTelemetryInstrumentation()
                         .Build();
 
                     await cluster.RefreshSchemaAsync().ConfigureAwait(false);
@@ -136,6 +139,7 @@ namespace One.Inception.EventStore.Cassandra
 
                     cluster = connStrBuilder
                         .ApplyToBuilder(builder)
+                        .WithOpenTelemetryInstrumentation()
                         .Build();
 
                     sessionWithLongTimeout = await cluster.ConnectAsync().ConfigureAwait(false);
