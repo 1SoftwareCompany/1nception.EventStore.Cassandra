@@ -37,5 +37,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="One.Inception.EventStore.Cassandra.Integration.Tests" />
+    <InternalsVisibleTo Include="One.Inception.EventStore.Cassandra.Tests" />
   </ItemGroup>
 </Project>
