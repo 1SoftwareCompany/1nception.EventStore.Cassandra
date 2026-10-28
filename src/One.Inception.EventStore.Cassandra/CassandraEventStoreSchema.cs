@@ -1,4 +1,5 @@
 using System;
+using One.Inception.MessageProcessing;
 using System.Linq;
 using System.Threading.Tasks;
 using Cassandra;
@@ -17,16 +18,18 @@ namespace One.Inception.EventStore.Cassandra
         private const string CREATE_INDEX_BY_EVENT_TYPE_TABLE_TEMPLATE = @"CREATE TABLE IF NOT EXISTS {0}.{1} (et text, pid int, aid blob, rev int, pos int, ts bigint, PRIMARY KEY ((et,pid),ts,aid,rev,pos)) WITH CLUSTERING ORDER BY (ts ASC);"; // ASC element required to be in second position in primary key https://stackoverflow.com/questions/23185331/cql-bad-request-missing-clustering-order-for-column
         private const string INDEX_BY_EVENT_TYPE_TABLE_NAME = "index_by_eventtype";
         private readonly ICassandraProvider cassandraProvider;
+        private readonly IInceptionContextAccessor contextAccessor;
         private readonly ITableNamingStrategy tableNameStrategy;
         private readonly ICassandraReplicationStrategy replicationStrategy;
 
         private Task<ISession> GetSessionAsync() => cassandraProvider.GetSessionAsync();
 
-        public CassandraEventStoreSchema(ICassandraProvider cassandraProvider, ITableNamingStrategy tableNameStrategy, ICassandraReplicationStrategy replicationStrategy)
+        public CassandraEventStoreSchema(ICassandraProvider cassandraProvider, ITableNamingStrategy tableNameStrategy, ICassandraReplicationStrategy replicationStrategy, IInceptionContextAccessor contextAccessor = null)
         {
             if (cassandraProvider is null) throw new ArgumentNullException(nameof(cassandraProvider));
 
             this.cassandraProvider = cassandraProvider;
+            this.contextAccessor = contextAccessor;
             this.tableNameStrategy = tableNameStrategy ?? throw new ArgumentNullException(nameof(tableNameStrategy));
             this.replicationStrategy = replicationStrategy;
         }
@@ -48,9 +51,12 @@ namespace One.Inception.EventStore.Cassandra
 
         public async Task CreateKeyspace(ISession session)
         {
+            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
             long t0 = Stopwatch.GetTimestamp();
 
             IStatement createTableStatement = await GetCreateKeySpaceQuery(session).ConfigureAwait(false);
+            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
+            logger.LogTrace("Executing CREATE KEYSPACE: Tenant={tenant}, Keyspace={keyspace}", contextAccessor?.Context?.Tenant, cassandraProvider.GetKeyspace());
             var rs = await session.ExecuteAsync(createTableStatement).ConfigureAwait(false);
 
             TimeSpan elapsed = Stopwatch.GetElapsedTime(t0);
@@ -81,6 +87,7 @@ namespace One.Inception.EventStore.Cassandra
 
         private async Task CreateTableAsync(ISession session, string cqlQueryTemplate, string tableName)
         {
+            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
             long t0 = Stopwatch.GetTimestamp();
 
             string keyspace = cassandraProvider.GetKeyspace();
@@ -92,6 +99,8 @@ namespace One.Inception.EventStore.Cassandra
             PreparedStatement createEventsTableStatement = await session.PrepareAsync(query).ConfigureAwait(false);
             createEventsTableStatement.SetConsistencyLevel(ConsistencyLevel.All);
 
+            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
+            logger.LogTrace("Executing CREATE TABLE: Tenant={tenant}, Table={table}, Keyspace={keyspace}", contextAccessor?.Context?.Tenant, tableName, keyspace);
             var rs = await session.ExecuteAsync(createEventsTableStatement.Bind()).ConfigureAwait(false);
 
             TimeSpan elapsed = Stopwatch.GetElapsedTime(t0);
