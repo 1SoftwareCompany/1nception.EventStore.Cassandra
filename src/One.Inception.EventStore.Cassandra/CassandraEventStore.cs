@@ -30,6 +30,7 @@ namespace One.Inception.EventStore.Cassandra
         private readonly IndexByEventTypeStore indexByEventTypeStore;
         private readonly ILogger<CassandraEventStore> logger;
         private readonly ICassandraProvider cassandraProvider;
+        private readonly IInceptionContextAccessor contextAccessor;
 
         // the store is registered as tenant singleton and the events table is only 1 so there could only be one prepared statement per tenant
         private LoadAggregateEventsQuery _loadAggregateEventsQuery;
@@ -40,12 +41,13 @@ namespace One.Inception.EventStore.Cassandra
         private LoadEventQuery _loadEventQuery;
         private DeleteEventQuery _deleteEventQuery;
 
-        private Task<ISession> GetSessionAsync() => cassandraProvider.GetSessionAsync();// In order to keep only 1 session alive (https://docs.datastax.com/en/developer/csharp-driver/3.16/faq/)
+        private Task<ISession> GetSessionAsync(CancellationToken cancellationToken = default) => cassandraProvider.GetSessionAsync(cancellationToken);// In order to keep only 1 session alive (https://docs.datastax.com/en/developer/csharp-driver/3.16/faq/)
 
         public CassandraEventStore(IInceptionContextAccessor contextAccessor, ICassandraProvider cassandraProvider, ITableNamingStrategy tableNameStrategy, ISerializer serializer, IndexByEventTypeStore indexByEventTypeStore, ILogger<CassandraEventStore> logger)
         {
             if (cassandraProvider is null) throw new ArgumentNullException(nameof(cassandraProvider));
             this.cassandraProvider = cassandraProvider;
+            this.contextAccessor = contextAccessor;
             this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
             this.indexByEventTypeStore = indexByEventTypeStore ?? throw new ArgumentNullException(nameof(indexByEventTypeStore));
             this.logger = logger;
@@ -112,7 +114,7 @@ namespace One.Inception.EventStore.Cassandra
 
         public async Task<EventStream> LoadAsync(IBlobId aggregateId)
         {
-            List<AggregateCommit> aggregateCommits = await LoadAggregateCommitsAsync(aggregateId).ConfigureAwait(false);
+            List<AggregateCommit> aggregateCommits = await LoadAggregateCommitsAsync(aggregateId, contextAccessor.Context.CancellationToken).ConfigureAwait(false);
 
             return new EventStream(aggregateCommits);
         }
@@ -153,19 +155,26 @@ namespace One.Inception.EventStore.Cassandra
 
             if (replayOptions.EventTypeId is null)
             {
-                return EnumerateEventStoreGG(@operator, replayOptions, cancellationToken);
+                return ReturnWhenCanceledAsync(EnumerateEventStoreGG(@operator, replayOptions, cancellationToken), cancellationToken);
             }
             else
             {
                 if (replayOptions.AggregateRootId is not null)
                 {
-                    return EnumerateEventStoreForSpecifiedEventTypeAndAggregateId(@operator, replayOptions, cancellationToken);
+                    return ReturnWhenCanceledAsync(EnumerateEventStoreForSpecifiedEventTypeAndAggregateId(@operator, replayOptions, cancellationToken), cancellationToken);
                 }
                 else
                 {
-                    return EnumerateEventStoreForSpecifiedEvent(@operator, replayOptions, cancellationToken);
+                    return ReturnWhenCanceledAsync(EnumerateEventStoreForSpecifiedEvent(@operator, replayOptions, cancellationToken), cancellationToken);
                 }
             }
+        }
+
+        // The jobs check the token after the enumeration. An exception would turn a canceled job into a failed one.
+        private static async Task ReturnWhenCanceledAsync(Task enumeration, CancellationToken cancellationToken)
+        {
+            try { await enumeration.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         }
 
         public async Task<IEvent> LoadEventWithRebuildProjectionAsync(IndexRecord indexRecord)
@@ -200,17 +209,19 @@ namespace One.Inception.EventStore.Cassandra
             return default;
         }
 
-        private async Task<List<AggregateCommit>> LoadAggregateCommitsAsync(IBlobId id)
+        private async Task<List<AggregateCommit>> LoadAggregateCommitsAsync(IBlobId id, CancellationToken cancellationToken)
         {
-            ISession session = await GetSessionAsync().ConfigureAwait(false);
-            PreparedStatement bs = await _loadAggregateEventsQuery.PrepareAsync(session).ConfigureAwait(false);
+            ISession session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
+            PreparedStatement bs = await _loadAggregateEventsQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
             BoundStatement boundStatement = bs.Bind(id.RawId);
 
-            var result = await session.ExecuteAsync(boundStatement).ConfigureAwait(false);
+            var result = await session.ExecuteAsync(boundStatement).WaitAsync(cancellationToken).ConfigureAwait(false);
 
             var block = new AggregateCommitBlock(id);
             foreach (var row in result.GetRows())
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 int revision = row.GetValue<int>(CassandraColumn.Revision);
                 int position = row.GetValue<int>(CassandraColumn.Position);
                 long timestamp = row.GetValue<long>(CassandraColumn.Timestamp);
@@ -218,6 +229,10 @@ namespace One.Inception.EventStore.Cassandra
 
                 IMessage messageData = serializer.DeserializeFromBytes<IMessage>(data);
                 block.AppendBlock(revision, position, messageData, timestamp);
+
+                // Otherwise the enumerator fetches the next page synchronously and we cannot stop waiting for it.
+                if (result.GetAvailableWithoutFetching() == 0 && result.IsFullyFetched == false)
+                    await result.FetchMoreResultsAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return block.Complete();
@@ -285,8 +300,8 @@ namespace One.Inception.EventStore.Cassandra
 
         private async Task EnumerateEventStoreForSpecifiedEvent(PlayerOperator @operator, PlayerOptions replayOptions, CancellationToken cancellationToken = default)
         {
-            ISession session = await GetSessionAsync().ConfigureAwait(false);
-            PreparedStatement queryStatement = await _loadEventQuery.PrepareAsync(session).ConfigureAwait(false);
+            ISession session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
+            PreparedStatement queryStatement = await _loadEventQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
 
             List<Task> tasks = new List<Task>();
             await foreach (IndexRecord indexRecord in indexByEventTypeStore.GetRecordsAsync(replayOptions, @operator.NotifyProgressAsync, cancellationToken))
@@ -317,7 +332,7 @@ namespace One.Inception.EventStore.Cassandra
                 {
                     Task task = Task.Run(async () =>
                     {
-                        var stream = await LoadAsync(indexRecord.AggregateRootId).ConfigureAwait(false);
+                        var stream = await LoadAsync(indexRecord.AggregateRootId, cancellationToken).ConfigureAwait(false);
                         await @operator.OnAggregateStreamLoadedAsync(stream).ConfigureAwait(false);
                     });
                     tasks.Add(task);
@@ -335,7 +350,7 @@ namespace One.Inception.EventStore.Cassandra
             }
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
-            if (@operator.OnFinish is not null)
+            if (@operator.OnFinish is not null && cancellationToken.IsCancellationRequested == false)
             {
                 await @operator.OnFinish().ConfigureAwait(false);
             }
@@ -346,7 +361,7 @@ namespace One.Inception.EventStore.Cassandra
             List<AggregateEventRaw> aggregateEventRaws = new List<AggregateEventRaw>();
 
             List<Task> tasks = new List<Task>();
-            await foreach (AggregateEventRaw @event in LoadEntireEventStoreAsync(replayOptions, @operator.NotifyProgressAsync).ConfigureAwait(false))
+            await foreach (AggregateEventRaw @event in LoadEntireEventStoreAsync(replayOptions, @operator.NotifyProgressAsync, cancellationToken).ConfigureAwait(false))
             {
                 if (@operator.OnLoadAsync is not null)
                 {
@@ -383,6 +398,12 @@ namespace One.Inception.EventStore.Cassandra
                 }
             }
 
+            if (cancellationToken.IsCancellationRequested) // the buffered aggregate may be incomplete and the enumeration did not finish
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+                return;
+            }
+
             // No child left behind. Make sure the last aggregate is also passed allong.
             if (@operator.OnAggregateStreamLoadedAsync is not null && aggregateEventRaws.Count > 0)
             {
@@ -406,7 +427,7 @@ namespace One.Inception.EventStore.Cassandra
                 return;
             }
 
-            var result = await LoadAsync(replayOptions.AggregateRootId.RawId);
+            var result = await LoadAsync(replayOptions.AggregateRootId.RawId, cancellationToken);
 
             if (result.Commits.Count == 0)
                 return;
@@ -425,6 +446,8 @@ namespace One.Inception.EventStore.Cassandra
                     {
                         if (shouldBreak)
                             break;
+
+                        cancellationToken.ThrowIfCancellationRequested();
 
                         AggregateCommitRaw commit = result.Commits[commitIndex];
                         for (int eventIndex = commit.Events.Count - 1; eventIndex >= 0; eventIndex--)
@@ -446,6 +469,8 @@ namespace One.Inception.EventStore.Cassandra
                 {
                     for (int commitIndex = 0; commitIndex < result.Commits.Count; commitIndex++)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
+
                         AggregateCommitRaw commit = result.Commits[commitIndex];
                         for (int eventIndex = 0; eventIndex < commit.Events.Count; eventIndex++)
                         {
@@ -459,17 +484,19 @@ namespace One.Inception.EventStore.Cassandra
             }
         }
 
-        private async Task<AggregateStream> LoadAsync(ReadOnlyMemory<byte> id)
+        private async Task<AggregateStream> LoadAsync(ReadOnlyMemory<byte> id, CancellationToken cancellationToken)
         {
             List<AggregateEventRaw> aggregateEvents = new List<AggregateEventRaw>();
 
-            ISession session = await GetSessionAsync().ConfigureAwait(false);
-            PreparedStatement bs = await _loadAggregateEventsQuery.PrepareAsync(session).ConfigureAwait(false);
+            ISession session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
+            PreparedStatement bs = await _loadAggregateEventsQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
             BoundStatement boundStatement = bs.Bind(id);
 
-            var result = await session.ExecuteAsync(boundStatement).ConfigureAwait(false);
+            var result = await session.ExecuteAsync(boundStatement).WaitAsync(cancellationToken).ConfigureAwait(false);
             foreach (var row in result.GetRows())
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 int revision = row.GetValue<int>(CassandraColumn.Revision);
                 int position = row.GetValue<int>(CassandraColumn.Position);
                 long timestamp = row.GetValue<long>(CassandraColumn.Timestamp);
@@ -477,6 +504,10 @@ namespace One.Inception.EventStore.Cassandra
 
                 var eventRaw = new AggregateEventRaw(id, data, revision, position, timestamp);
                 aggregateEvents.Add(eventRaw);
+
+                // Otherwise the enumerator fetches the next page synchronously and we cannot stop waiting for it.
+                if (result.GetAvailableWithoutFetching() == 0 && result.IsFullyFetched == false)
+                    await result.FetchMoreResultsAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return new AggregateStream(aggregateEvents);
@@ -488,8 +519,8 @@ namespace One.Inception.EventStore.Cassandra
             long after = replayOptions.After.HasValue ? replayOptions.After.Value.ToFileTime() : 0;
             long before = replayOptions.Before.HasValue ? replayOptions.Before.Value.ToFileTime() : 0;
 
-            ISession session = await GetSessionAsync().ConfigureAwait(false);
-            PreparedStatement statement = await _loadEventsQuery.PrepareAsync(session).ConfigureAwait(false);
+            ISession session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
+            PreparedStatement statement = await _loadEventsQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
 
             IStatement queryStatement = statement.Bind();
             queryStatement
@@ -501,7 +532,7 @@ namespace One.Inception.EventStore.Cassandra
                 if (pagingInfo.HasToken())
                     queryStatement.SetPagingState(pagingInfo.Token);
 
-                RowSet result = await session.ExecuteAsync(queryStatement).ConfigureAwait(false);
+                RowSet result = await session.ExecuteAsync(queryStatement).WaitAsync(cancellationToken).ConfigureAwait(false);
 
                 foreach (var row in result.GetRows())
                 {

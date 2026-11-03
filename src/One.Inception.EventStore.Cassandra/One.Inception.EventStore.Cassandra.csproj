@@ -29,14 +29,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="1nception" Version="13.3.0-preview.4" />
-    <PackageReference Include="CassandraCSharpDriver" Version="3.22.1" />
-    <PackageReference Include="CassandraCSharpDriver.OpenTelemetry" Version="3.22.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.13" />
+    <PackageReference Include="1nception" Version="14.0.0-preview.3" />
+    <PackageReference Include="CassandraCSharpDriver" Version="3.23.0" />
+    <PackageReference Include="CassandraCSharpDriver.OpenTelemetry" Version="3.23.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="One.Inception.EventStore.Cassandra.Integration.Tests" />
     <InternalsVisibleTo Include="One.Inception.EventStore.Cassandra.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.403" />
   </ItemGroup>
 </Project>

@@ -39,7 +39,7 @@ namespace One.Inception.EventStore.Cassandra
 
         private static SemaphoreSlim clusterThreadGate = new SemaphoreSlim(1, 1); // Instantiate a Singleton of the Semaphore with a value of 1. This means that only 1 thread can be granted access at a time
 
-        public async Task<ICluster> GetClusterAsync()
+        public async Task<ICluster> GetClusterAsync(CancellationToken cancellationToken = default)
         {
             if (cluster is null == false)
                 return cluster;
@@ -48,12 +48,14 @@ namespace One.Inception.EventStore.Cassandra
 
             try
             {
-                lockSuccess = await clusterThreadGate.WaitAsync(30000).ConfigureAwait(false);
+                lockSuccess = await clusterThreadGate.WaitAsync(30000, cancellationToken).ConfigureAwait(false);
                 if (lockSuccess == false)
                     throw new TimeoutException("Timeout while waiting for cluster lock.");
 
                 if (cluster is null == false)
                     return cluster;
+
+                cancellationToken.ThrowIfCancellationRequested(); // before `cluster` is assigned, otherwise the next caller gets a cluster which never refreshed its schema
 
                 Builder builder = initializer as Builder;
                 if (builder is null)
@@ -176,10 +178,10 @@ namespace One.Inception.EventStore.Cassandra
 
         private static SemaphoreSlim sessionThreadGate = new SemaphoreSlim(1, 1); // Instantiate a Singleton of the Semaphore with a value of 1. This means that only 1 thread can be granted access at a time
 
-        public async Task<ISession> GetSessionAsync()
+        public async Task<ISession> GetSessionAsync(CancellationToken cancellationToken = default)
         {
             EnsureNormalAccess();
-            ISession result = await GetSessionCoreAsync().ConfigureAwait(false);
+            ISession result = await GetSessionCoreAsync(cancellationToken).ConfigureAwait(false);
             EnsureNormalAccess();
             return result;
         }
@@ -194,16 +196,14 @@ namespace One.Inception.EventStore.Cassandra
                 throw new TenantBeingDeletedException(context.Tenant);
         }
 
-        public Task<ISession> GetWipeSessionAsync()
+        public Task<ISession> GetWipeSessionAsync(CancellationToken cancellationToken = default)
         {
             logger.LogTrace("Cassandra wipe session requested: Tenant={tenant}, BeingDeleted={beingDeleted}. Bypassing normal access check; reusing shared session.",
                 contextAccessor?.Context?.Tenant, contextAccessor?.Context?.IsTenantBeingDeleted);
-            return GetSessionCoreAsync();
+            return GetSessionCoreAsync(cancellationToken);
         }
 
-
-
-        private async Task<ISession> GetSessionCoreAsync()
+        private async Task<ISession> GetSessionCoreAsync(CancellationToken cancellationToken)
         {
             logger.LogTrace("Acquiring shared Cassandra session: Tenant={tenant}, CachedSessionAvailable={cachedSessionAvailable}", contextAccessor?.Context?.Tenant, session != null && !session.IsDisposed);
             if (session is null || session.IsDisposed)
@@ -211,7 +211,7 @@ namespace One.Inception.EventStore.Cassandra
                 bool lockSuccess = false;
                 try
                 {
-                    lockSuccess = await sessionThreadGate.WaitAsync(30000).ConfigureAwait(false);
+                    lockSuccess = await sessionThreadGate.WaitAsync(30000, cancellationToken).ConfigureAwait(false);
                     if (lockSuccess == false)
                         throw new TimeoutException("Timeout while waiting for session lock.");
 
@@ -220,7 +220,7 @@ namespace One.Inception.EventStore.Cassandra
                         if (logger.IsEnabled(LogLevel.Information))
                             logger.LogInformation("Refreshing cassandra session...");
 
-                        ICluster cluster = await GetClusterAsync().ConfigureAwait(false);
+                        ICluster cluster = await GetClusterAsync(cancellationToken).ConfigureAwait(false);
                         session = await cluster.ConnectAsync().ConfigureAwait(false);
                     }
                 }

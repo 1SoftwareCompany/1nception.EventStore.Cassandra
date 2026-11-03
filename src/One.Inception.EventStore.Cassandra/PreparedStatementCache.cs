@@ -29,14 +29,15 @@ namespace One.Inception.EventStore.Cassandra
         internal abstract string GetQueryTemplate();
         internal virtual string GetTableName() => tableNameStrategy?.GetName();
 
-        internal async Task<PreparedStatement> PrepareAsync(ISession session)
+        internal async Task<PreparedStatement> PrepareAsync(ISession session, CancellationToken cancellationToken = default)
         {
+            bool lockSuccess = false;
             try
             {
                 PreparedStatement preparedStatement = default;
                 if (_tenantCache.TryGetValue(context.Context.Tenant, out preparedStatement) == false)
                 {
-                    await threadGate.WaitAsync(10000).ConfigureAwait(false);
+                    lockSuccess = await threadGate.WaitAsync(10000, cancellationToken).ConfigureAwait(false);
                     if (_tenantCache.TryGetValue(context.Context.Tenant, out preparedStatement))
                         return preparedStatement;
 
@@ -57,13 +58,15 @@ namespace One.Inception.EventStore.Cassandra
 
                 return preparedStatement;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 throw new Exception($"Failed to prepare query statement for {this.GetType().Name}", ex);
             }
             finally
             {
-                threadGate?.Release();
+                if (lockSuccess)
+                    threadGate?.Release();
             }
         }
 
