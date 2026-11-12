@@ -229,10 +229,6 @@ namespace One.Inception.EventStore.Cassandra
 
                 IMessage messageData = serializer.DeserializeFromBytes<IMessage>(data);
                 block.AppendBlock(revision, position, messageData, timestamp);
-
-                // Otherwise the enumerator fetches the next page synchronously and we cannot stop waiting for it.
-                if (result.GetAvailableWithoutFetching() == 0 && result.IsFullyFetched == false)
-                    await result.FetchMoreResultsAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return block.Complete();
@@ -504,10 +500,6 @@ namespace One.Inception.EventStore.Cassandra
 
                 var eventRaw = new AggregateEventRaw(id, data, revision, position, timestamp);
                 aggregateEvents.Add(eventRaw);
-
-                // Otherwise the enumerator fetches the next page synchronously and we cannot stop waiting for it.
-                if (result.GetAvailableWithoutFetching() == 0 && result.IsFullyFetched == false)
-                    await result.FetchMoreResultsAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return new AggregateStream(aggregateEvents);
