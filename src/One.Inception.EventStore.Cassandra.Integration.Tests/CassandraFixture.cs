@@ -50,7 +50,7 @@ public class CassandraFixture : ICassandraProvider, IAsyncDisposable, IAsyncLife
         }
     }
 
-    public Task<ICluster> GetClusterAsync()
+    public Task<ICluster> GetClusterAsync(CancellationToken cancellationToken = default)
     {
         if (cluster == null)
         {
@@ -70,7 +70,7 @@ public class CassandraFixture : ICassandraProvider, IAsyncDisposable, IAsyncLife
         return Task.FromResult(cluster);
     }
 
-    public Task<ISession> GetSessionAsync()
+    public Task<ISession> GetSessionAsync(CancellationToken cancellationToken = default)
     {
         var className = GetKeyspace();
 

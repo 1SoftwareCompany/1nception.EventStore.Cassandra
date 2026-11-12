@@ -25,7 +25,7 @@ public class IndexByEventTypeStore : IIndexStore
     private IndexDeleteQuery _deleteQuery;
     private IndexMinTsQuery _minTsQuery;
 
-    private Task<ISession> GetSessionAsync() => cassandraProvider.GetSessionAsync(); // In order to keep only 1 session alive (https://docs.datastax.com/en/developer/csharp-driver/3.16/faq/)
+    private Task<ISession> GetSessionAsync(CancellationToken cancellationToken = default) => cassandraProvider.GetSessionAsync(cancellationToken); // In order to keep only 1 session alive (https://docs.datastax.com/en/developer/csharp-driver/3.16/faq/)
 
     public IndexByEventTypeStore(IInceptionContextAccessor contextAccessor, ICassandraProvider cassandraProvider, ILogger<IndexByEventTypeStore> logger)
     {
@@ -182,7 +182,7 @@ public class IndexByEventTypeStore : IIndexStore
 
         IndexPagingInfo pagingInfo = IndexPagingInfo.Parse(replayOptions.PaginationToken);
 
-        ISession session = await GetSessionAsync().ConfigureAwait(false);
+        ISession session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
 
         long after = await GetAfterDateAsync(session, replayOptions.After).ConfigureAwait(false);
         long before = GetBeforeDate(replayOptions.Before);
@@ -192,7 +192,7 @@ public class IndexByEventTypeStore : IIndexStore
 
         for (int cpid = afterPID; cpid <= beforePID; cpid = PartitionCalculator.GetNext(cpid))
         {
-            PreparedStatement statement = await _readRangeQuery.PrepareAsync(session).ConfigureAwait(false);
+            PreparedStatement statement = await _readRangeQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
             IStatement queryStatement = statement.Bind(replayOptions.EventTypeId, cpid);
 
             queryStatement
@@ -204,7 +204,7 @@ public class IndexByEventTypeStore : IIndexStore
                 if (pagingInfo.HasToken())
                     queryStatement.SetPagingState(pagingInfo.Token);
 
-                RowSet result = await session.ExecuteAsync(queryStatement).ConfigureAwait(false);
+                RowSet result = await session.ExecuteAsync(queryStatement).WaitAsync(cancellationToken).ConfigureAwait(false);
 
                 foreach (var row in result)
                 {
@@ -241,9 +241,9 @@ public class IndexByEventTypeStore : IIndexStore
             if (optionsValue.HasValue && optionsValue.Value != MinAfterTimestamp)
                 return optionsValue.Value.ToFileTime();
 
-            PreparedStatement statement = await _minTsQuery.PrepareAsync(session).ConfigureAwait(false);
+            PreparedStatement statement = await _minTsQuery.PrepareAsync(session, cancellationToken).ConfigureAwait(false);
 
-            RowSet result = await session.ExecuteAsync(statement.Bind()).ConfigureAwait(false);
+            RowSet result = await session.ExecuteAsync(statement.Bind()).WaitAsync(cancellationToken).ConfigureAwait(false);
             Row row = result.SingleOrDefault();
             return row.GetValue<long>("ts");
         }
