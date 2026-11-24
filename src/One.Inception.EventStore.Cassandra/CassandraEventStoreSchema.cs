@@ -52,10 +52,17 @@ namespace One.Inception.EventStore.Cassandra
         public async Task CreateKeyspace(ISession session)
         {
             contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
+
+            if (session.Cluster.Metadata.GetKeyspace(cassandraProvider.GetKeyspace()) is not null)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                    logger.LogDebug("[Projections] Keyspace `{keyspace}` already exists. Skipping creation.", cassandraProvider.GetKeyspace());
+                return;
+            }
+
             long t0 = Stopwatch.GetTimestamp();
 
             IStatement createTableStatement = await GetCreateKeySpaceQuery(session).ConfigureAwait(false);
-            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
             logger.LogTrace("Executing CREATE KEYSPACE: Tenant={tenant}, Keyspace={keyspace}", contextAccessor?.Context?.Tenant, cassandraProvider.GetKeyspace());
             var rs = await session.ExecuteAsync(createTableStatement).ConfigureAwait(false);
 
@@ -71,8 +78,8 @@ namespace One.Inception.EventStore.Cassandra
 
         public async Task CreateIndeciesAsync(ISession session)
         {
-           await CreateTableAsync(session, CREATE_INDEX_BY_EVENT_TYPE_TABLE_TEMPLATE, INDEX_BY_EVENT_TYPE_TABLE_NAME).ConfigureAwait(false);
-           await CreateTableAsync(session, MessageCounter.CreateTableTemplate, "EventCounter").ConfigureAwait(false);
+            await CreateTableAsync(session, CREATE_INDEX_BY_EVENT_TYPE_TABLE_TEMPLATE, INDEX_BY_EVENT_TYPE_TABLE_NAME).ConfigureAwait(false);
+            await CreateTableAsync(session, MessageCounter.CreateTableTemplate, "EventCounter").ConfigureAwait(false);
         }
 
         private async Task<IStatement> GetCreateKeySpaceQuery(ISession session)
@@ -88,6 +95,14 @@ namespace One.Inception.EventStore.Cassandra
         private async Task CreateTableAsync(ISession session, string cqlQueryTemplate, string tableName)
         {
             contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
+
+            if (session.Cluster.Metadata.GetTable(cassandraProvider.GetKeyspace(), tableName) is not null)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                    logger.LogDebug("[Projections] Table `{keyspace}.{tableName}` already exists. Skipping creation.", cassandraProvider.GetKeyspace(), tableName);
+                return;
+            }
+
             long t0 = Stopwatch.GetTimestamp();
 
             string keyspace = cassandraProvider.GetKeyspace();
@@ -99,7 +114,6 @@ namespace One.Inception.EventStore.Cassandra
             PreparedStatement createEventsTableStatement = await session.PrepareAsync(query).ConfigureAwait(false);
             createEventsTableStatement.SetConsistencyLevel(ConsistencyLevel.All);
 
-            contextAccessor?.Context?.EnsureTenantIsNotBeingDeleted();
             logger.LogTrace("Executing CREATE TABLE: Tenant={tenant}, Table={table}, Keyspace={keyspace}", contextAccessor?.Context?.Tenant, tableName, keyspace);
             var rs = await session.ExecuteAsync(createEventsTableStatement.Bind()).ConfigureAwait(false);
 
