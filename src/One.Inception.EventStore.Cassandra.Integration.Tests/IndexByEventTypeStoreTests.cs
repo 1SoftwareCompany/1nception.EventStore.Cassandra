@@ -39,7 +39,7 @@ public class IndexByEventTypeStoreTests :
         await index.ApendAsync(record);
 
         List<IndexRecord> results = new List<IndexRecord>();
-        await foreach (var item in index.GetRecordsAsync(new EventStore.PlayerOptions() { EventTypeId = id, After = DateTimeOffset.UtcNow.AddDays(-1), Before = DateTimeOffset.UtcNow.AddDays(1) }).ConfigureAwait(false))
+        await foreach (var item in index.GetRecordsAsync(new EventStore.PlayerOptions() { EventTypeId = id, After = DateTimeOffset.UtcNow.AddDays(-1), Before = DateTimeOffset.UtcNow.AddDays(1) }, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(false))
         {
             results.Add(item);
         }
@@ -104,7 +104,7 @@ public class IndexByEventTypeStoreTests :
             After = DateTimeOffset.UtcNow.AddDays(-1),
             Before = DateTimeOffset.UtcNow.AddDays(1)
         };
-        await foreach (var item in index.GetRecordsAsync(playerOptions).ConfigureAwait(false))
+        await foreach (var item in index.GetRecordsAsync(playerOptions, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(false))
         {
             results.Add(item);
         }

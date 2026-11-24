@@ -111,7 +111,7 @@ public class CassandraEventStoreTests : IClassFixture<CassandraEventStoreFixture
 
         await cassandraEventStoreFixture.EventStore.AppendAsync(commit);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement($"SELECT rev,pos,ts,data FROM {cassandraEventStoreFixture.TableNaming.GetName()} WHERE id = ?;", arId);
         var rows = await session.ExecuteAsync(statement);
         var rowsList = rows.ToList();
@@ -147,7 +147,7 @@ public class CassandraEventStoreTests : IClassFixture<CassandraEventStoreFixture
 
         await cassandraEventStoreFixture.EventStore.AppendAsync(eventRaw);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement($"SELECT rev,pos,ts,data FROM {cassandraEventStoreFixture.TableNaming.GetName()} WHERE id = ?;", arId);
         var rows = await session.ExecuteAsync(statement);
 
@@ -341,7 +341,7 @@ public class CassandraEventStoreTests : IClassFixture<CassandraEventStoreFixture
         var eventRaw = new AggregateEventRaw(commit.AggregateRootId, null, revision, 0, timestamp);
         var deleted = await cassandraEventStoreFixture.EventStore.DeleteAsync(eventRaw);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement($"SELECT rev,pos,ts,data FROM {cassandraEventStoreFixture.TableNaming.GetName()} WHERE id = ?;", arId);
         var rows = await session.ExecuteAsync(statement);
 

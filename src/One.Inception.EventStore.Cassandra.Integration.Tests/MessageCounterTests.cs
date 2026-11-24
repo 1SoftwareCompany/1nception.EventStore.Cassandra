@@ -29,7 +29,7 @@ public class MessageCounterTests
 
         await counter.IncrementAsync(countedType);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement("""SELECT * FROM "message_counter" WHERE msgid=?;""", contractId);
         var rows = await session.ExecuteAsync(statement);
 
@@ -52,7 +52,7 @@ public class MessageCounterTests
         await counter.IncrementAsync(countedType, 5);
         await counter.DecrementAsync(countedType);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement("""SELECT * FROM "message_counter" WHERE msgid=?;""", contractId);
         var rows = await session.ExecuteAsync(statement);
 
@@ -92,7 +92,7 @@ public class MessageCounterTests
         await counter.IncrementAsync(countedType, 5);
         await counter.ResetAsync(countedType);
 
-        var session = await cassandraFixture.GetSessionAsync();
+        var session = await cassandraFixture.GetSessionAsync(TestContext.Current.CancellationToken);
         var statement = new SimpleStatement("""SELECT * FROM "message_counter" WHERE msgid=?;""", contractId);
         var rows = await session.ExecuteAsync(statement);
 

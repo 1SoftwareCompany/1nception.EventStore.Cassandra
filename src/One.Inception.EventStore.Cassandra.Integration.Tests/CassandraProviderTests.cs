@@ -28,7 +28,7 @@ public class CassandraProviderTests
         var keyspaceNaming = new NoKeyspaceNamingStrategy();
         var provider = new CassandraProvider(new CassandraProviderOptionsMonitorMock(options), keyspaceNaming, NullLogger<CassandraProvider>.Instance);
 
-        var cluster = await provider.GetClusterAsync();
+        var cluster = await provider.GetClusterAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(cluster);
 
@@ -57,7 +57,7 @@ public class CassandraProviderTests
         var nullLogger = new NullLoggerFactory().CreateLogger<CassandraProvider>();
         var provider = new CassandraProvider(new CassandraProviderOptionsMonitorMock(options), keyspaceNaming, nullLogger);
 
-        var session = await provider.GetSessionAsync();
+        var session = await provider.GetSessionAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(session);
         Assert.False(session.IsDisposed);
@@ -83,7 +83,7 @@ public class CassandraProviderTests
         var nullLogger = new NullLoggerFactory().CreateLogger<CassandraProvider>();
         var provider = new CassandraProvider(new CassandraProviderOptionsMonitorMock(options), keyspaceNaming, nullLogger);
 
-        var session = await provider.GetSessionAsync();
+        var session = await provider.GetSessionAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(session);
         Assert.False(session.IsDisposed);

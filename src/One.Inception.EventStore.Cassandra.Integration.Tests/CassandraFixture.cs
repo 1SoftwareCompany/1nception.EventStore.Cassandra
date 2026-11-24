@@ -18,8 +18,7 @@ public class CassandraFixture : ICassandraProvider, IAsyncDisposable, IAsyncLife
 
     public async ValueTask InitializeAsync()
     {
-        Container = new ContainerBuilder()
-            .WithImage("cassandra:4.1")
+        Container = new ContainerBuilder("cassandra:5.0.9")
             .WithPortBinding(7000, true)
             .WithPortBinding(7001, true)
             .WithPortBinding(7199, true)
